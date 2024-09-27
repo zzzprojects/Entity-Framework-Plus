@@ -6,6 +6,7 @@
 // Copyright © ZZZ Projects Inc. 2014 - 2016. All rights reserved.
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -53,11 +54,11 @@ namespace Z.EntityFramework.Plus
         {
             EntityFrameworkManager.IsEntityFrameworkPlus = true;
 
-            CacheGenericFilterContext = new Dictionary<string, AliasQueryFilterContext>();
+            CacheGenericFilterContext = new ConcurrentDictionary<string, AliasQueryFilterContext>();
             CacheWeakFilterContext = new ConditionalWeakTable<DbContext, AliasQueryFilterContext>();
             CacheWeakFilterQueryable = new ConditionalWeakTable<IQueryable, AliasBaseQueryFilterQueryable>();
-            GlobalFilters = new Dictionary<object, AliasBaseQueryFilter>();
-            GlobalInitializeFilterActions = new List<Tuple<AliasBaseQueryFilter, Action<AliasBaseQueryFilter>>>();
+            GlobalFilters = new ConcurrentDictionary<object, AliasBaseQueryFilter>();
+            GlobalInitializeFilterActions = new ConcurrentBag<Tuple<AliasBaseQueryFilter, Action<AliasBaseQueryFilter>>>();
 
 #if NETSTANDARD2_0 && !EFCLASSIC
     ForceCast = true;
@@ -72,15 +73,15 @@ namespace Z.EntityFramework.Plus
 
         /// <summary>Gets the global filters.</summary>
         /// <value>The global filters.</value>
-        public static Dictionary<object, AliasBaseQueryFilter> GlobalFilters { get; }
+        public static ConcurrentDictionary<object, AliasBaseQueryFilter> GlobalFilters { get; }
 
         /// <summary>Gets or sets the global initialize filter actions.</summary>
         /// <value>The global initialize filter actions.</value>
-        public static List<Tuple<AliasBaseQueryFilter, Action<AliasBaseQueryFilter>>> GlobalInitializeFilterActions { get; set; }
+        public static ConcurrentBag<Tuple<AliasBaseQueryFilter, Action<AliasBaseQueryFilter>>> GlobalInitializeFilterActions { get; set; }
 
         /// <summary>Gets or sets the dictionary containing generic filter context information for a DbContext.FullName.</summary>
         /// <value>The dictionary containing generic filter context information for a DbContext.FullName.</value>
-        public static Dictionary<string, AliasQueryFilterContext> CacheGenericFilterContext { get; set; }
+        public static ConcurrentDictionary<string, AliasQueryFilterContext> CacheGenericFilterContext { get; set; }
 
         /// <summary>Gets or sets the weak table containing filter context for a specified context.</summary>
         /// <value>The weak table containing filter context for a specified context.</value>
@@ -100,14 +101,8 @@ namespace Z.EntityFramework.Plus
 
             if (!CacheGenericFilterContext.TryGetValue(key, out filterContext))
             {
-                lock (GenericFilterContextLock)
-                {
-                    if (!CacheGenericFilterContext.TryGetValue(key, out filterContext))
-                    {
-                        filterContext = new AliasQueryFilterContext(context, true);
-                        CacheGenericFilterContext.Add(key, filterContext);
-                    }
-                }
+                filterContext = new AliasQueryFilterContext(context, true);
+                filterContext = CacheGenericFilterContext.GetOrAdd(key, filterContext);
             }
 
             return filterContext;
@@ -180,7 +175,7 @@ namespace Z.EntityFramework.Plus
 #else
                 filter = new QueryFilter<T>(null, queryFilter) { IsDefaultEnabled = isEnabled };
 #endif
-                GlobalFilters.Add(key, filter);
+                filter = GlobalFilters.GetOrAdd(key, filter);
             }
 
             return filter;
